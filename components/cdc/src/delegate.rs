@@ -116,6 +116,7 @@ impl DownstreamState {
 }
 
 #[derive(Clone)]
+// todo: add comment here to describe
 pub struct Downstream {
     // TODO: include cdc request.
     /// A unique identifier of the Downstream.
@@ -213,6 +214,7 @@ impl Downstream {
 }
 
 #[derive(Default)]
+// todo: add comment about `Pending` usage
 struct Pending {
     pub downstreams: Vec<Downstream>,
     pub locks: Vec<PendingLock>,
@@ -225,6 +227,7 @@ impl Drop for Pending {
     }
 }
 
+// todo: add comment about `PendingLock` usage
 enum PendingLock {
     Track { key: Vec<u8>, start_ts: TimeStamp },
     Untrack { key: Vec<u8> },
@@ -235,7 +238,7 @@ enum PendingLock {
 /// A CDC delegate of a raftstore region peer.
 ///
 /// It converts raft commands into CDC events and broadcast to downstreams.
-/// It also track trancation on the fly in order to compute resolved ts.
+/// It also track transaction on the fly in order to compute resolved ts.
 pub struct Delegate {
     pub handle: ObserveHandle,
     pub region_id: u64,

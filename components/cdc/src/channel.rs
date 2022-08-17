@@ -301,6 +301,7 @@ impl_from_future_send_error! {
 }
 
 #[derive(Clone)]
+// todo (Ling Jin): add description about the sink, for better code reading.
 pub struct Sink {
     unbounded_sender: UnboundedSender<(CdcEvent, usize)>,
     bounded_sender: Sender<(CdcEvent, usize)>,

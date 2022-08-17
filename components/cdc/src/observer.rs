@@ -98,7 +98,9 @@ impl CdcObserver {
         None
     }
 
-    /// Check whether the region is subscribed or not.
+    /// Check whether the region is subscribed or not
+    ///
+    /// Return ObserverID if subscribed.
     pub fn is_subscribed(&self, region_id: u64) -> Option<ObserveId> {
         self.observe_regions
             .read()
