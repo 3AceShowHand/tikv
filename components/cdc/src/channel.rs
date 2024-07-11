@@ -360,14 +360,14 @@ pub struct Drain {
 impl<'a> Drain {
     pub fn drain(&'a mut self) -> impl Stream<Item = (CdcEvent, usize)> + 'a {
         let observed = (&mut self.unbounded_receiver).map(|x| (x.created, x.event, x.size));
-        let scaned = (&mut self.bounded_receiver).filter_map(|x| {
+        let scanned = (&mut self.bounded_receiver).filter_map(|x| {
             if x.truncated.load(Ordering::Acquire) {
                 return futures::future::ready(None);
             }
             futures::future::ready(Some((x.created, x.event, x.size)))
         });
 
-        stream::select(scaned, observed).map(|(start, mut event, size)| {
+        stream::select(scanned, observed).map(|(start, mut event, size)| {
             CDC_EVENTS_PENDING_DURATION.observe(start.saturating_elapsed_secs() * 1000.0);
             if let CdcEvent::Barrier(ref mut barrier) = event {
                 if let Some(barrier) = barrier.take() {
@@ -438,7 +438,7 @@ impl Drop for Drain {
 }
 
 #[allow(clippy::result_unit_err)]
-pub fn recv_timeout<S, I>(s: &mut S, dur: std::time::Duration) -> Result<Option<I>, ()>
+pub fn recv_timeout<S, I>(s: &mut S, dur: Duration) -> Result<Option<I>, ()>
 where
     S: Stream<Item = I> + Unpin,
 {
@@ -535,10 +535,10 @@ mod tests {
 
     #[test]
     fn test_congest() {
-        let mut e = kvproto::cdcpb::Event::default();
+        let mut e = Event::default();
         e.region_id = 1;
         let event = CdcEvent::Event(e.clone());
-        assert!(event.size() != 0);
+        assert_ne!(event.size(), 0);
         // 1KB
         let max_pending_bytes = 1024;
         let buffer = max_pending_bytes / event.size();
@@ -552,10 +552,10 @@ mod tests {
 
     #[test]
     fn test_set_capacity() {
-        let mut e = kvproto::cdcpb::Event::default();
+        let mut e = Event::default();
         e.region_id = 1;
         let event = CdcEvent::Event(e.clone());
-        assert!(event.size() != 0);
+        assert_ne!(event.size(), 0);
         // 1KB
         let max_pending_bytes = 1024;
         let buffer = max_pending_bytes / event.size();
@@ -603,10 +603,10 @@ mod tests {
 
     #[test]
     fn test_force_send() {
-        let mut e = kvproto::cdcpb::Event::default();
+        let mut e = Event::default();
         e.region_id = 1;
         let event = CdcEvent::Event(e.clone());
-        assert!(event.size() != 0);
+        assert_ne!(event.size(), 0);
         // 1KB
         let max_pending_bytes = 1024;
         let buffer = max_pending_bytes / event.size();
@@ -626,10 +626,10 @@ mod tests {
 
     #[test]
     fn test_channel_memory_leak() {
-        let mut e = kvproto::cdcpb::Event::default();
+        let mut e = Event::default();
         e.region_id = 1;
         let event = CdcEvent::Event(e.clone());
-        assert!(event.size() != 0);
+        assert_ne!(event.size(), 0);
         // 1KB
         let max_pending_bytes = 1024;
         let buffer = max_pending_bytes / event.size() + 1;
