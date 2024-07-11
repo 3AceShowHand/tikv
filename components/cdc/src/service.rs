@@ -19,7 +19,7 @@ use kvproto::{
 use tikv_util::{error, info, memory::MemoryQuota, warn, worker::*};
 
 use crate::{
-    channel::{channel, Sink, CDC_CHANNLE_CAPACITY},
+    channel::{channel, Sink, CDC_CHANNEL_CAPACITY},
     delegate::{Downstream, DownstreamId, DownstreamState, ObservedRange},
     endpoint::{Deregister, Task},
 };
@@ -276,18 +276,15 @@ impl Service {
         peer: &str,
     ) -> semver::Version {
         let version_field = request.get_header().get_ticdc_version();
-        match semver::Version::parse(version_field) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(
+        semver::Version::parse(version_field).unwrap_or_else(|e| {
+            warn!(
                     "empty or invalid TiCDC version, please upgrading TiCDC";
                     "version" => version_field,
                     "downstream" => ?peer, "region_id" => request.region_id,
                     "error" => ?e,
                 );
-                semver::Version::new(0, 0, 0)
-            }
-        }
+            semver::Version::new(0, 0, 0)
+        })
     }
 
     fn set_conn_version(
@@ -335,17 +332,14 @@ impl Service {
         conn_id: ConnId,
     ) -> Result<(), String> {
         let observed_range =
-            match ObservedRange::new(request.start_key.clone(), request.end_key.clone()) {
-                Ok(observed_range) => observed_range,
-                Err(e) => {
-                    warn!(
+            ObservedRange::new(request.start_key.clone(), request.end_key.clone()).unwrap_or_else(|e| {
+                warn!(
                         "cdc invalid observed start key or end key version";
                         "downstream" => ?peer, "region_id" => request.region_id,
                         "error" => ?e,
                     );
-                    ObservedRange::default()
-                }
-            };
+                ObservedRange::default()
+            });
         let downstream = Downstream::new(
             peer.to_owned(),
             request.get_region_epoch().clone(),
@@ -406,7 +400,7 @@ impl Service {
     ) {
         sink.enhance_batch(true);
         let (event_sink, mut event_drain) =
-            channel(CDC_CHANNLE_CAPACITY, self.memory_quota.clone());
+            channel(CDC_CHANNEL_CAPACITY, self.memory_quota.clone());
         let conn = Conn::new(event_sink, ctx.peer());
         let conn_id = conn.get_id();
         let mut explicit_features = vec![];

@@ -42,8 +42,8 @@ const CDC_EVENT_MAX_COUNT: usize = 64;
 /// The maximum bytes of in-memory incremental scan events is about 6MB
 /// per-connection (EventFeed RPC).
 ///
-/// 6MB = (CDC_CHANNLE_CAPACITY + CDC_EVENT_MAX_COUNT) * CDC_EVENT_MAX_BYTES.
-pub const CDC_CHANNLE_CAPACITY: usize = 128;
+/// 6MB = (CDC_CHANNEL_CAPACITY + CDC_EVENT_MAX_COUNT) * CDC_EVENT_MAX_BYTES.
+pub const CDC_CHANNEL_CAPACITY: usize = 128;
 
 /// The maximum bytes of ChangeDataEvent, 6MB.
 const CDC_RESP_MAX_BYTES: u32 = 6 * 1024 * 1024;
@@ -243,7 +243,7 @@ macro_rules! impl_from_future_send_error {
 impl_from_future_send_error! {
     FuturesSendError,
     TrySendError<ObservedEvent>,
-    TrySendError<ScanedEvent>,
+    TrySendError<ScannedEvent>,
 }
 
 impl From<MemoryQuotaExceeded> for SendError {
@@ -258,11 +258,11 @@ pub struct ObservedEvent {
     pub size: usize,
 }
 
-pub struct ScanedEvent {
+pub struct ScannedEvent {
     pub created: Instant,
     pub event: CdcEvent,
     pub size: usize,
-    // Incremental scan can be canceled by region errors. We must check it when draing
+    // Incremental scan can be canceled by region errors. We must check it when draining
     // an event instead of emit it to `Sink`.
     pub truncated: Arc<AtomicBool>,
 }
@@ -277,9 +277,9 @@ impl ObservedEvent {
     }
 }
 
-impl ScanedEvent {
+impl ScannedEvent {
     fn new(created: Instant, event: CdcEvent, size: usize, truncated: Arc<AtomicBool>) -> Self {
-        ScanedEvent {
+        ScannedEvent {
             created,
             event,
             size,
@@ -291,7 +291,7 @@ impl ScanedEvent {
 #[derive(Clone)]
 pub struct Sink {
     unbounded_sender: UnboundedSender<ObservedEvent>,
-    bounded_sender: Sender<ScanedEvent>,
+    bounded_sender: Sender<ScannedEvent>,
     memory_quota: Arc<MemoryQuota>,
 }
 
@@ -318,24 +318,24 @@ impl Sink {
         }
     }
 
-    /// Only scaned events can be sent by `send_all`.
+    /// Only scanned events can be sent by `send_all`.
     pub async fn send_all(
         &mut self,
-        scaned_events: Vec<CdcEvent>,
+        scanned_events: Vec<CdcEvent>,
         truncated: Arc<AtomicBool>,
     ) -> Result<(), SendError> {
         // Allocate quota in advance.
         let mut total_bytes = 0;
-        for event in &scaned_events {
+        for event in &scanned_events {
             let bytes = event.size();
             total_bytes += bytes;
         }
         self.memory_quota.alloc(total_bytes as _)?;
 
         let now = Instant::now_coarse();
-        for event in scaned_events {
+        for event in scanned_events {
             let bytes = event.size() as usize;
-            let sc_event = ScanedEvent::new(now, event, bytes, truncated.clone());
+            let sc_event = ScannedEvent::new(now, event, bytes, truncated.clone());
             if let Err(e) = self.bounded_sender.feed(sc_event).await {
                 // Free quota if send fails.
                 self.memory_quota.free(total_bytes as _);
@@ -353,7 +353,7 @@ impl Sink {
 
 pub struct Drain {
     unbounded_receiver: UnboundedReceiver<ObservedEvent>,
-    bounded_receiver: Receiver<ScanedEvent>,
+    bounded_receiver: Receiver<ScannedEvent>,
     memory_quota: Arc<MemoryQuota>,
 }
 
