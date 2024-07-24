@@ -20,7 +20,7 @@ use futures::{
 use grpcio::WriteFlags;
 use kvproto::cdcpb::{ChangeDataEvent, Event, ResolvedTs};
 use protobuf::Message;
-use tikv_util::{impl_display_as_debug, time::Instant, warn};
+use tikv_util::{impl_display_as_debug, info, time::Instant, warn};
 
 use crate::metrics::*;
 
@@ -216,6 +216,7 @@ impl MemoryQuota {
         let capacity = self.capacity.load(Ordering::Acquire);
         loop {
             if in_use_bytes + bytes > capacity {
+                info!("alloc memory quota failed"; "bytes" => bytes, "in_use" => in_use_bytes, "capacity" => capacity);
                 return false;
             }
             let new_in_use_bytes = in_use_bytes + bytes;
@@ -421,6 +422,7 @@ impl Drop for Drain {
                 total_bytes += bytes;
             }
             memory_quota.free(total_bytes);
+            info!("drop memory quota"; "total_bytes" => total_bytes, "in_use" => memory_quota.in_use());
         });
         block_on(&mut drain);
         let takes = start.saturating_elapsed();
