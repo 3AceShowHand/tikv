@@ -1,6 +1,8 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 use std::ops::{Bound, Deref};
+use std::thread;
+use std::time::Duration;
 use rand::Rng;
 use engine_traits::{ReadOptions, CF_DEFAULT, CF_WRITE};
 use getset::CopyGetters;
@@ -152,6 +154,7 @@ pub fn get_old_value<S: EngineSnapshot>(
 
     // Cannot get old value from cache, seek for it in engine.
     old_value_cache.miss_count += 1;
+    thread::sleep(Duration::from_millis(100));
     let key = key.truncate_ts().unwrap().append_ts(query_ts);
     let mut cursor = new_write_cursor_on_key(snapshot, &key);
     let value = near_seek_old_value(&key, &mut cursor, Either::Left(snapshot), statistics)?;
