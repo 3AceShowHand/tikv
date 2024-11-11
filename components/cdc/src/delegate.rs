@@ -764,6 +764,7 @@ impl Delegate {
                 Some(KvEntry::RawKvEntry(kv_pair)) => {
                     decode_rawkv(kv_pair.0, kv_pair.1, &mut row)?;
                     row_size = row.key.len() + row.value.len();
+                    info!("raw kv entry received")
                 }
                 Some(KvEntry::TxnEntry(TxnEntry::Prewrite {
                     default,
@@ -780,6 +781,7 @@ impl Delegate {
                     decode_default(default.1, &mut row, &mut _has_value);
                     row.old_value = old_value.finalized().unwrap_or_default();
                     row_size = row.key.len() + row.value.len() + row.old_value.len();
+                    info!("kv entry prewrite received")
                 }
                 Some(KvEntry::TxnEntry(TxnEntry::Commit {
                     default,
@@ -808,6 +810,7 @@ impl Delegate {
                     set_event_row_type(&mut row, EventLogType::Committed);
                     row.old_value = old_value.finalized().unwrap_or_default();
                     row_size = row.key.len() + row.value.len() + row.old_value.len();
+                    info!("kv entry commit received")
                 }
                 None => {
                     // This type means scan has finished.
