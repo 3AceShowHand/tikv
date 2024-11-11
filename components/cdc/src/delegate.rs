@@ -810,7 +810,6 @@ impl Delegate {
                     set_event_row_type(&mut row, EventLogType::Committed);
                     row.old_value = old_value.finalized().unwrap_or_default();
                     row_size = row.key.len() + row.value.len() + row.old_value.len();
-                    info!("kv entry commit received")
                 }
                 None => {
                     // This type means scan has finished.
