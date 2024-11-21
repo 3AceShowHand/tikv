@@ -348,6 +348,7 @@ impl<E: KvEngine> Initializer<E> {
             CDC_SCAN_LONG_DURATION_REGIONS.dec();
         });
 
+        let mut total = 0;
         while !done {
             // Add metrics to observe long time incremental scan region count
             if !scan_long_time.load(Ordering::SeqCst)
@@ -369,7 +370,9 @@ impl<E: KvEngine> Initializer<E> {
             let entries = self
                 .scan_batch(&mut scanner, cursors, &mut scan_stat)
                 .await?;
+            total += entries.len();
             if let Some(None) = entries.last() {
+                info!("cdc scan entries meet last"; "total" => total, "region_id" => region_id);
                 // If the last element is None, it means scanning is finished.
                 done = true;
             }
