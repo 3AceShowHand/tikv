@@ -306,6 +306,11 @@ impl Drop for Pending {
             );
         }
         self.memory_quota.free(bytes);
+        info!("cdc pending drop memory quota",
+            "bytes" => bytes,
+            "num_locks" => num_locks,
+            "memory_quota_in_use" => self.memory_quota.in_use(),
+            "memory_quota_capacity" => self.memory_quota.capacity())
     }
 }
 
