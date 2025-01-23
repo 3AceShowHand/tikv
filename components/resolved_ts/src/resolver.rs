@@ -165,7 +165,7 @@ impl Drop for Resolver {
             );
         }
         self.memory_quota.free(bytes);
-        info!("cdc resolver drop memory quota",
+        info!("cdc resolver drop memory quota";
             "region_id" => self.region_id,
             "bytes" => bytes,
             "num_locks" => self.num_locks(),
