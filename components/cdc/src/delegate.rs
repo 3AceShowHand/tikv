@@ -242,7 +242,6 @@ impl Downstream {
 struct Pending {
     downstreams: Vec<Downstream>,
     locks: Vec<PendingLock>,
-    pending_bytes: usize,
     memory_quota: Arc<MemoryQuota>,
 }
 
@@ -251,7 +250,6 @@ impl Pending {
         Pending {
             downstreams: vec![],
             locks: vec![],
-            pending_bytes: 0,
             memory_quota,
         }
     }
@@ -260,7 +258,6 @@ impl Pending {
         let bytes = lock.approximate_heap_size();
         self.memory_quota.alloc(bytes)?;
         self.locks.push(lock);
-        self.pending_bytes += bytes;
         CDC_PENDING_BYTES_GAUGE.add(bytes as i64);
         Ok(())
     }
@@ -270,8 +267,11 @@ impl Pending {
             Error::MemoryQuotaExceeded(tikv_util::memory::MemoryQuotaExceeded)
         ));
         // Must take locks, otherwise it may double free memory quota on drop.
+        let mut total_bytes = 0;
         for lock in mem::take(&mut self.locks) {
-            self.memory_quota.free(lock.approximate_heap_size());
+            let bytes = lock.approximate_heap_size();
+            total_bytes += bytes as i64;
+            self.memory_quota.free(bytes);
             match lock {
                 PendingLock::Track { key, start_ts } => {
                     resolver.track_lock(start_ts, key, None)?;
@@ -279,25 +279,21 @@ impl Pending {
                 PendingLock::Untrack { key } => resolver.untrack_lock(&key, None),
             }
         }
+        CDC_PENDING_BYTES_GAUGE.sub(total_bytes as i64);
         Ok(())
     }
 }
 
 impl Drop for Pending {
     fn drop(&mut self) {
-        CDC_PENDING_BYTES_GAUGE.sub(self.pending_bytes as i64);
         let locks = mem::take(&mut self.locks);
-        if locks.is_empty() {
-            return;
-        }
-
         // Free memory quota used by pending locks and unlocks.
-        let mut bytes = 0;
+        let mut total_bytes = 0;
         let num_locks = locks.len();
         for lock in locks {
-            bytes += lock.approximate_heap_size();
+            total_bytes += lock.approximate_heap_size();
         }
-        if bytes > ON_DROP_WARN_HEAP_SIZE {
+        if total_bytes > ON_DROP_WARN_HEAP_SIZE {
             warn!("cdc drop huge Pending";
                 "bytes" => bytes,
                 "num_locks" => num_locks,
@@ -305,7 +301,8 @@ impl Drop for Pending {
                 "memory_quota_capacity" => self.memory_quota.capacity(),
             );
         }
-        self.memory_quota.free(bytes);
+        self.memory_quota.free(total_bytes);
+        CDC_PENDING_BYTES_GAUGE.sub(total_bytes as i64);
         info!("cdc pending drop memory quota";
             "bytes" => bytes,
             "num_locks" => num_locks,
