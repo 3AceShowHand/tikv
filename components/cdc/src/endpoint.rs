@@ -1405,6 +1405,7 @@ mod tests {
         router::{CdcRaftRouter, RaftStoreRouter},
         store::{fsm::StoreMeta, msg::CasualMessage, PeerMsg, ReadDelegate},
     };
+    use resolved_ts::TsSource;
     use test_pd_client::TestPdClient;
     use test_raftstore::MockRaftStoreRouter;
     use tikv::{
@@ -2110,7 +2111,7 @@ mod tests {
             conn_id,
         });
         let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-        let resolver = Resolver::new(1, memory_quota);
+        let resolver = Resolver::new(1, memory_quota, TsSource::Cdc);
         let observe_id = suite.endpoint.capture_regions[&1].handle.id;
         suite.on_region_ready(observe_id, resolver, region.clone());
         suite.run(Task::MinTs {
@@ -2147,7 +2148,7 @@ mod tests {
             conn_id,
         });
         let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-        let resolver = Resolver::new(2, memory_quota);
+        let resolver = Resolver::new(2, memory_quota, TsSource::Cdc);
         region.set_id(2);
         let observe_id = suite.endpoint.capture_regions[&2].handle.id;
         suite.on_region_ready(observe_id, resolver, region);
@@ -2197,7 +2198,7 @@ mod tests {
             conn_id,
         });
         let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-        let resolver = Resolver::new(3, memory_quota);
+        let resolver = Resolver::new(3, memory_quota, TsSource::Cdc);
         region.set_id(3);
         let observe_id = suite.endpoint.capture_regions[&3].handle.id;
         suite.on_region_ready(observe_id, resolver, region);
@@ -2425,7 +2426,7 @@ mod tests {
                     conn_id,
                 });
                 let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-                let resolver = Resolver::new(region_id, memory_quota);
+                let resolver = Resolver::new(region_id, memory_quota, TsSource::Cdc);
                 let observe_id = suite.endpoint.capture_regions[&region_id].handle.id;
                 let mut region = Region::default();
                 region.set_id(region_id);
@@ -2588,7 +2589,7 @@ mod tests {
         suite.run(Task::ResolverReady {
             observe_id,
             region: region.clone(),
-            resolver: Resolver::new(1, memory_quota),
+            resolver: Resolver::new(1, memory_quota, TsSource::Cdc),
         });
 
         // Deregister deletgate due to epoch not match for conn b.
@@ -2712,7 +2713,7 @@ mod tests {
             });
 
             let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-            let mut resolver = Resolver::new(id, memory_quota);
+            let mut resolver = Resolver::new(id, memory_quota, TsSource::Cdc);
             resolver
                 .track_lock(TimeStamp::compose(0, id), vec![], None)
                 .unwrap();

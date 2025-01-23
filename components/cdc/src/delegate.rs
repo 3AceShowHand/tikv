@@ -270,7 +270,7 @@ impl Pending {
         let mut total_bytes = 0;
         for lock in mem::take(&mut self.locks) {
             let bytes = lock.approximate_heap_size();
-            total_bytes += bytes as i64;
+            total_bytes += bytes;
             self.memory_quota.free(bytes);
             match lock {
                 PendingLock::Track { key, start_ts } => {
@@ -295,7 +295,7 @@ impl Drop for Pending {
         }
         if total_bytes > ON_DROP_WARN_HEAP_SIZE {
             warn!("cdc drop huge Pending";
-                "bytes" => bytes,
+                "bytes" => total_bytes,
                 "num_locks" => num_locks,
                 "memory_quota_in_use" => self.memory_quota.in_use(),
                 "memory_quota_capacity" => self.memory_quota.capacity(),
@@ -304,7 +304,7 @@ impl Drop for Pending {
         self.memory_quota.free(total_bytes);
         CDC_PENDING_BYTES_GAUGE.sub(total_bytes as i64);
         info!("cdc pending drop memory quota";
-            "bytes" => bytes,
+            "bytes" => total_bytes,
             "num_locks" => num_locks,
             "memory_quota_in_use" => self.memory_quota.in_use(),
             "memory_quota_capacity" => self.memory_quota.capacity())
@@ -1273,7 +1273,7 @@ mod tests {
         delegate.subscribe(downstream).unwrap();
         assert!(delegate.handle.is_observing());
         let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-        let resolver = Resolver::new(region_id, memory_quota);
+        let resolver = Resolver::new(region_id, memory_quota, TsSource::Cdc);
         assert!(
             delegate
                 .on_region_ready(resolver, region)
@@ -1432,7 +1432,7 @@ mod tests {
         {
             let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
             let failures = delegate
-                .on_region_ready(Resolver::new(1, memory_quota), region)
+                .on_region_ready(Resolver::new(1, memory_quota, TsSource::Cdc), region)
                 .unwrap();
             assert_eq!(failures.len(), 1);
             let id = failures[0].0.id;

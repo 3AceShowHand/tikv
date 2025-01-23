@@ -192,10 +192,16 @@ impl ObserveRegion {
         meta: Region,
         rrp: Arc<RegionReadProgress>,
         memory_quota: Arc<MemoryQuota>,
+        source: TsSource,
         cancelled: Sender<()>,
     ) -> Self {
         ObserveRegion {
-            resolver: Resolver::with_read_progress(meta.id, Some(rrp), memory_quota.clone()),
+            resolver: Resolver::with_read_progress(
+                meta.id,
+                Some(rrp),
+                memory_quota.clone(),
+                source,
+            ),
             meta,
             handle: ObserveHandle::new(),
             resolver_status: ResolverStatus::Pending {
@@ -381,6 +387,7 @@ pub struct Endpoint<T, E: KvEngine, S> {
     scheduler: Scheduler<Task>,
     advance_worker: AdvanceTsWorker,
     _phantom: PhantomData<(T, E)>,
+    source: TsSource
 }
 
 // methods that are used for metrics and logging
@@ -655,6 +662,7 @@ where
         concurrency_manager: ConcurrencyManager,
         env: Arc<Environment>,
         security_mgr: Arc<SecurityManager>,
+        source: TsSource
     ) -> Self {
         let (region_read_progress, store_id) = {
             let meta = store_meta.lock().unwrap();
@@ -686,6 +694,7 @@ where
             scan_concurrency_semaphore,
             regions: HashMap::default(),
             _phantom: PhantomData::default(),
+            source,
         };
         ep.handle_advance_resolved_ts(leader_resolver);
         ep
@@ -704,6 +713,7 @@ where
             region.clone(),
             read_progress,
             self.memory_quota.clone(),
+            self.source.clone(),
             cancelled_tx,
         );
         let observe_handle = observe_region.handle.clone();

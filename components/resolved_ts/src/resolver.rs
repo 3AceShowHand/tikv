@@ -96,6 +96,8 @@ pub struct Resolver {
     memory_quota: Arc<MemoryQuota>,
     // The last attempt of resolve(), used for diagnosis.
     last_attempt: Option<LastAttempt>,
+
+    source: TsSource,
 }
 
 #[derive(Clone)]
@@ -130,6 +132,7 @@ impl std::fmt::Debug for Resolver {
         let far_lock = self.oldest_transaction();
         let mut dt = f.debug_tuple("Resolver");
         dt.field(&format_args!("region={}", self.region_id));
+        dt.field(&format_args!("source={}", self.source.label()));
 
         if let Some((ts, txn_locks)) = far_lock {
             dt.field(&format_args!(
@@ -150,24 +153,29 @@ impl std::fmt::Debug for Resolver {
 impl Drop for Resolver {
     fn drop(&mut self) {
         // Free memory quota used by locks_by_key.
-        let mut bytes = 0;
+        let mut total_bytes = 0;
         let num_locks = self.num_locks();
         for key in self.locks_by_key.keys() {
-            bytes += self.lock_heap_size(key);
+            total_bytes += self.lock_heap_size(key);
         }
-        if bytes > ON_DROP_WARN_HEAP_SIZE {
+        if total_bytes > ON_DROP_WARN_HEAP_SIZE {
             warn!("drop huge resolver";
                 "region_id" => self.region_id,
-                "bytes" => bytes,
+                "source" => self.source.label(),
+                "bytes" => total_bytes,
                 "num_locks" => num_locks,
                 "memory_quota_in_use" => self.memory_quota.in_use(),
                 "memory_quota_capacity" => self.memory_quota.capacity(),
             );
         }
-        self.memory_quota.free(bytes);
-        info!("cdc resolver drop memory quota";
+        self.memory_quota.free(total_bytes);
+        RTS_MEMORY_QUOTA_USAGE_GAUGE_VEC
+            .with_label_values(&[self.source.label()])
+            .sub(total_bytes as i64);
+        info!("resolver drop memory quota";
             "region_id" => self.region_id,
-            "bytes" => bytes,
+            "source" => self.source.label(),
+            "bytes" => total_bytes,
             "num_locks" => self.num_locks(),
             "memory_quota_in_use" => self.memory_quota.in_use(),
             "memory_quota_capacity" => self.memory_quota.capacity());
@@ -175,14 +183,15 @@ impl Drop for Resolver {
 }
 
 impl Resolver {
-    pub fn new(region_id: u64, memory_quota: Arc<MemoryQuota>) -> Resolver {
-        Resolver::with_read_progress(region_id, None, memory_quota)
+    pub fn new(region_id: u64, memory_quota: Arc<MemoryQuota>, source: TsSource) -> Resolver {
+        Resolver::with_read_progress(region_id, None, memory_quota, source)
     }
 
     pub fn with_read_progress(
         region_id: u64,
         read_progress: Option<Arc<RegionReadProgress>>,
         memory_quota: Arc<MemoryQuota>,
+        source: TsSource,
     ) -> Resolver {
         Resolver {
             region_id,
@@ -196,6 +205,7 @@ impl Resolver {
             stopped: false,
             memory_quota,
             last_attempt: None,
+            source,
         }
     }
 
@@ -299,11 +309,17 @@ impl Resolver {
             "key_heap_size" => bytes,
         );
         self.memory_quota.alloc(bytes)?;
+        RTS_MEMORY_QUOTA_USAGE_GAUGE_VEC
+            .with_label_values(&[self.source.label()])
+            .add(bytes as i64);
         let key: Arc<[u8]> = key.into_boxed_slice().into();
         match self.locks_by_key.entry(key) {
             HashMapEntry::Occupied(_) => {
                 // Free memory quota because it's already in the map.
                 self.memory_quota.free(bytes);
+                RTS_MEMORY_QUOTA_USAGE_GAUGE_VEC
+                    .with_label_values(&[self.source.label()])
+                    .sub(bytes as i64);
             }
             HashMapEntry::Vacant(entry) => {
                 // Add lock count for the start ts.
@@ -327,6 +343,9 @@ impl Resolver {
         let start_ts = if let Some(start_ts) = self.locks_by_key.remove(key) {
             let bytes = self.lock_heap_size(key);
             self.memory_quota.free(bytes);
+            RTS_MEMORY_QUOTA_USAGE_GAUGE_VEC
+                .with_label_values(&[self.source.label()])
+                .add(bytes as i64);
             start_ts
         } else {
             debug!("untrack a lock that was not tracked before";
@@ -541,7 +560,7 @@ mod tests {
 
         for (i, case) in cases.into_iter().enumerate() {
             let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-            let mut resolver = Resolver::new(1, memory_quota);
+            let mut resolver = Resolver::new(1, memory_quota, TsSource::PdTso);
             for e in case.clone() {
                 match e {
                     Event::Lock(start_ts, key) => {
@@ -566,7 +585,7 @@ mod tests {
     #[test]
     fn test_memory_quota() {
         let memory_quota = Arc::new(MemoryQuota::new(1024));
-        let mut resolver = Resolver::new(1, memory_quota.clone());
+        let mut resolver = Resolver::new(1, memory_quota.clone(), TsSource::PdTso);
         let mut key = vec![0; 77];
         let lock_size = resolver.lock_heap_size(&key);
         let mut ts = TimeStamp::default();
@@ -591,7 +610,7 @@ mod tests {
     #[test]
     fn test_untrack_lock_shrink_ratio() {
         let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-        let mut resolver = Resolver::new(1, memory_quota);
+        let mut resolver = Resolver::new(1, memory_quota, TsSource::PdTso);
         let mut key = vec![0; 16];
         let mut ts = TimeStamp::default();
         for _ in 0..1000 {
@@ -635,18 +654,19 @@ mod tests {
         // Trigger aggressive shrink.
         resolver.last_aggressive_shrink_time = Instant::now_coarse() - Duration::from_secs(600);
         resolver.resolve(TimeStamp::new(0), None, TsSource::PdTso);
-        assert!(
-            resolver.locks_by_key.capacity() == 0,
+        assert_eq!(
+            resolver.locks_by_key.capacity(),
+            0,
             "{}, {}",
             resolver.locks_by_key.capacity(),
-            resolver.locks_by_key.len(),
+            resolver.locks_by_key.len()
         );
     }
 
     #[test]
     fn test_idempotent_track_and_untrack_lock() {
         let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
-        let mut resolver = Resolver::new(1, memory_quota);
+        let mut resolver = Resolver::new(1, memory_quota, TsSource::PdTso);
         let mut key = vec![0; 16];
 
         // track_lock

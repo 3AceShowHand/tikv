@@ -224,7 +224,7 @@ impl<E: KvEngine> Initializer<E> {
             "end_key" => log_wrappers::Value::key(snap.upper_bound().unwrap_or_default()));
 
         let mut resolver = if self.build_resolver {
-            Some(Resolver::new(region_id, memory_quota))
+            Some(Resolver::new(region_id, memory_quota, TsSource::Cdc))
         } else {
             None
         };

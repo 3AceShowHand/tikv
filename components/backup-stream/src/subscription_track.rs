@@ -532,7 +532,7 @@ impl TwoPhaseResolver {
         // TODO: limit the memory usage of the resolver.
         let memory_quota = Arc::new(MemoryQuota::new(std::usize::MAX));
         Self {
-            resolver: Resolver::new(region_id, memory_quota),
+            resolver: Resolver::new(region_id, memory_quota, TsSource::BackupStream),
             future_locks: Default::default(),
             stable_ts,
         }
