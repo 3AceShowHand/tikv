@@ -313,13 +313,12 @@ impl Service {
     //   subscriptions with the same `request_id` will be deregistered.
     fn handle_request(
         scheduler: &Scheduler<Task>,
-        peer: &str,
         request: ChangeDataRequest,
         conn_id: ConnId,
     ) -> Result<(), String> {
         match request.request {
             None | Some(ChangeDataRequest_oneof_request::Register(_)) => {
-                Self::handle_register(scheduler, peer, request, conn_id)
+                Self::handle_register(scheduler, request, conn_id)
             }
             Some(ChangeDataRequest_oneof_request::Deregister(_)) => {
                 Self::handle_deregister(scheduler, request, conn_id)
@@ -330,7 +329,6 @@ impl Service {
 
     fn handle_register(
         scheduler: &Scheduler<Task>,
-        peer: &str,
         request: ChangeDataRequest,
         conn_id: ConnId,
     ) -> Result<(), String> {
@@ -348,7 +346,6 @@ impl Service {
                 ObservedRange::default()
             });
         let downstream = Downstream::new(
-            peer.to_owned(),
             request.get_region_epoch().clone(),
             RequestId(request.request_id),
             conn_id,
@@ -450,10 +447,10 @@ impl Service {
                 // Get version from the first request in the stream.
                 let version = Self::parse_version_from_request_header(&request, &peer);
                 Self::set_conn_version(&scheduler, conn_id, version, explicit_features)?;
-                Self::handle_request(&scheduler, &peer, request, conn_id)?;
+                Self::handle_request(&scheduler,  request, conn_id)?;
             }
             while let Some(request) = stream.try_next().await? {
-                Self::handle_request(&scheduler, &peer, request, conn_id)?;
+                Self::handle_request(&scheduler, request, conn_id)?;
             }
             let deregister = Deregister::Conn(conn_id);
             if let Err(e) = scheduler.schedule(Task::Deregister(deregister)) {

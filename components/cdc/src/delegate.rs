@@ -126,8 +126,6 @@ impl DownstreamState {
 pub struct Downstream {
     /// A unique identifier of the Downstream.
     pub id: DownstreamId,
-    /// The IP address of downstream.
-    pub peer: String,
     pub region_epoch: RegionEpoch,
     /// The request ID set by CDC to identify events corresponding different
     /// requests.
@@ -164,7 +162,6 @@ impl Downstream {
     /// peer is the address of the downstream.
     /// sink sends data to the downstream.
     pub fn new(
-        peer: String,
         region_epoch: RegionEpoch,
         req_id: RequestId,
         conn_id: ConnId,
@@ -174,7 +171,6 @@ impl Downstream {
     ) -> Downstream {
         Downstream {
             id: DownstreamId::new(),
-            peer,
             region_epoch,
             req_id,
             conn_id,
@@ -1430,7 +1426,6 @@ mod tests {
         let rx = drain.drain();
         let request_id = RequestId(123);
         let mut downstream = Downstream::new(
-            String::new(),
             region_epoch,
             request_id,
             ConnId::new(),
@@ -1554,12 +1549,10 @@ mod tests {
     #[test]
     fn test_delegate_subscribe_unsubscribe() {
         let new_downstream = |id: RequestId, region_version: u64| {
-            let peer = format!("{:?}", id);
             let mut epoch = RegionEpoch::default();
             epoch.set_conf_ver(region_version);
             epoch.set_version(region_version);
             Downstream::new(
-                peer,
                 epoch,
                 id,
                 ConnId::new(),
@@ -1722,7 +1715,6 @@ mod tests {
 
         let (sink, mut drain) = channel(ConnId::default(), 1, Arc::new(MemoryQuota::new(1024)));
         let mut downstream = Downstream::new(
-            "peer".to_owned(),
             RegionEpoch::default(),
             RequestId(1),
             ConnId::new(),
@@ -1789,7 +1781,6 @@ mod tests {
 
         let (sink, mut drain) = channel(ConnId::default(), 1, Arc::new(MemoryQuota::new(1024)));
         let mut downstream = Downstream::new(
-            "peer".to_owned(),
             RegionEpoch::default(),
             RequestId(1),
             ConnId::new(),
