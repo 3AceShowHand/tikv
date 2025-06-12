@@ -1026,6 +1026,7 @@ impl Delegate {
                     &mut row.has_value,
                     true,
                 ) {
+                    info!("handle write, decode write returned"; "key" => ?key);
                     return Ok(());
                 }
 
@@ -1034,10 +1035,12 @@ impl Delegate {
                     set_event_row_type(&mut row.v, EventLogType::Committed);
                     let read_old_ts = TimeStamp::from(row.v.commit_ts).prev();
                     row.needs_old_value = Some(read_old_ts);
+                    info!("handle write, it's one pc"; "key" => ?key.clone());
                 } else {
                     assert_eq!(row.lock_count_modify, 0);
                     let start_ts = TimeStamp::from(row.v.start_ts);
-                    row.lock_count_modify = self.pop_lock(key, start_ts)?;
+                    row.lock_count_modify = self.pop_lock(key.clone(), start_ts)?;
+                    info!("handle write, pop lock"; "key" => ?key, "start_ts" => ?start_ts);
                 }
             }
             "lock" => {
@@ -1049,19 +1052,22 @@ impl Delegate {
                 let key = Key::from_encoded_slice(&put.key);
                 let row = rows.txns_by_key.entry(key.clone()).or_default();
                 if decode_lock(put.take_key(), lock, &mut row.v, &mut row.has_value) {
+                    info!("handle lock, decode lock returned"; "key" => ?key);
                     return Ok(());
                 }
 
                 assert_eq!(row.lock_count_modify, 0);
                 let mini_lock = MiniLock::new(row.v.start_ts, txn_source, generation);
-                row.lock_count_modify = self.push_lock(key, mini_lock)?;
+                row.lock_count_modify = self.push_lock(key.clone(), mini_lock)?;
                 let read_old_ts = std::cmp::max(for_update_ts, row.v.start_ts.into());
                 row.needs_old_value = Some(read_old_ts);
+                info!("handle lock, push lock"; "key" => ?key, "start_ts" => ?row.v.start_ts);
             }
             "" | "default" => {
                 let key = Key::from_encoded(put.take_key()).truncate_ts().unwrap();
-                let row = rows.txns_by_key.entry(key).or_default();
+                let row = rows.txns_by_key.entry(key.clone()).or_default();
                 decode_default(put.take_value(), &mut row.v, &mut row.has_value);
+                info!("handle default"; "key" => ?key);
             }
             other => panic!("invalid cf {}", other),
         }
