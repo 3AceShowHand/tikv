@@ -731,11 +731,12 @@ impl Delegate {
                 return Err(Error::request(err_header));
             }
             if !request.has_admin_request() {
-                let flags = WriteBatchFlags::from_bits_truncate(request.get_header().get_flags());
+                let is_one_pc = WriteBatchFlags::from_bits_truncate(request.get_header()
+                    .get_flags()).contains(WriteBatchFlags::ONE_PC);
                 self.sink_data(
                     index,
                     request.requests.into(),
-                    flags,
+                    is_one_pc,
                     old_value_cb,
                     old_value_cache,
                     statistics,
@@ -852,7 +853,7 @@ impl Delegate {
         &mut self,
         index: u64,
         requests: Vec<Request>,
-        flags: WriteBatchFlags,
+        is_one_pc: bool,
         old_value_cb: &OldValueCallback,
         old_value_cache: &mut OldValueCache,
         statistics: &mut Statistics,
@@ -867,7 +868,7 @@ impl Delegate {
         };
 
         let mut rows_builder = RowsBuilder::default();
-        rows_builder.is_one_pc = flags.contains(WriteBatchFlags::ONE_PC);
+        rows_builder.is_one_pc = is_one_pc;
         for mut req in requests {
             match req.get_cmd_type() {
                 CmdType::Put => self.sink_put(req.take_put(), &mut rows_builder)?,
