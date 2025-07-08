@@ -297,14 +297,14 @@ impl Drop for Pending {
         for lock in locks {
             bytes += lock.approximate_heap_size();
         }
-        if bytes > ON_DROP_WARN_HEAP_SIZE {
-            warn!("cdc drop huge Pending";
+        // if bytes > ON_DROP_WARN_HEAP_SIZE {
+        // }
+        warn!("cdc drop huge Pending";
                 "bytes" => bytes,
                 "num_locks" => num_locks,
                 "memory_quota_in_use" => self.memory_quota.in_use(),
                 "memory_quota_capacity" => self.memory_quota.capacity(),
             );
-        }
         self.memory_quota.free(bytes);
     }
 }

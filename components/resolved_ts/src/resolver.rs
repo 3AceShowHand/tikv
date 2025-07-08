@@ -155,15 +155,23 @@ impl Drop for Resolver {
         for key in self.locks_by_key.keys() {
             bytes += self.lock_heap_size(key);
         }
-        if bytes > ON_DROP_WARN_HEAP_SIZE {
-            warn!("drop huge resolver";
+        warn!("drop huge resolver";
                 "region_id" => self.region_id,
                 "bytes" => bytes,
                 "num_locks" => num_locks,
                 "memory_quota_in_use" => self.memory_quota.in_use(),
                 "memory_quota_capacity" => self.memory_quota.capacity(),
             );
-        }
+
+        // if bytes > ON_DROP_WARN_HEAP_SIZE {
+        //     warn!("drop huge resolver";
+        //         "region_id" => self.region_id,
+        //         "bytes" => bytes,
+        //         "num_locks" => num_locks,
+        //         "memory_quota_in_use" => self.memory_quota.in_use(),
+        //         "memory_quota_capacity" => self.memory_quota.capacity(),
+        //     );
+        // }
         self.memory_quota.free(bytes);
     }
 }
