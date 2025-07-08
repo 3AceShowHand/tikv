@@ -1249,6 +1249,11 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
     ) {
         let conn = self.connections.get_mut(&conn_id).unwrap();
         conn.check_version_and_set_feature(version, explicit_features);
+        info!("set connection version and features";
+            "downstream" => ?self.peer,
+            "version" => version,
+            "features" => ?self.features(),
+        );
     }
 }
 
