@@ -269,15 +269,15 @@ impl Pending {
         fail::fail_point!("cdc_pending_on_region_ready", |_| Err(
             Error::MemoryQuotaExceeded(tikv_util::memory::MemoryQuotaExceeded)
         ));
-        // Must take locks, otherwise it may double free memory quota on drop.
-        let pending_locks = mem::take(&mut self.locks);
-        let total_bytes = pending_locks
-            .iter().as_ref()
-            .map(|lock| lock.approximate_heap_size())
-            .sum::<usize>();
-        self.memory_quota.free(total_bytes);
 
-        for lock in pending_locks {
+        // free pending memory in advance, to prevent locks lost due to call mem::take
+        // which may leads to memory quota not freed.
+        self.memory_quota.free(self.pending_bytes);
+        CDC_PENDING_BYTES_GAUGE.sub(self.pending_bytes as i64);
+        self.pending_bytes = 0;
+
+        // Must take locks, otherwise it may double free memory quota on drop.
+        for lock in mem::take(&mut self.locks) {
             match lock {
                 PendingLock::Track { key, start_ts } => {
                     resolver.track_lock(start_ts, key, None)?;
@@ -291,18 +291,6 @@ impl Pending {
 
 impl Drop for Pending {
     fn drop(&mut self) {
-        CDC_PENDING_BYTES_GAUGE.sub(self.pending_bytes as i64);
-        let locks = mem::take(&mut self.locks);
-        if locks.is_empty() {
-            return;
-        }
-
-        // Free memory quota used by pending locks and unlocks.
-        let mut bytes = 0;
-        let num_locks = locks.len();
-        for lock in locks {
-            bytes += lock.approximate_heap_size();
-        }
         if bytes > ON_DROP_WARN_HEAP_SIZE {
             warn!("cdc drop huge Pending";
                 "bytes" => bytes,
@@ -311,7 +299,8 @@ impl Drop for Pending {
                 "memory_quota_capacity" => self.memory_quota.capacity(),
             );
         }
-        self.memory_quota.free(bytes);
+        self.memory_quota.free(self.pending_bytes);
+        CDC_PENDING_BYTES_GAUGE.sub(self.pending_bytes as i64);
     }
 }
 
