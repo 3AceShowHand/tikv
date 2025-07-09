@@ -291,9 +291,15 @@ impl Pending {
 
 impl Drop for Pending {
     fn drop(&mut self) {
-        if bytes > ON_DROP_WARN_HEAP_SIZE {
+        if self.pending_bytes == 0 {
+            return;
+        }
+
+        let locks = mem::take(&mut self.locks);
+        let num_locks = locks.len();
+        if self.pending_bytes > ON_DROP_WARN_HEAP_SIZE {
             warn!("cdc drop huge Pending";
-                "bytes" => bytes,
+                "bytes" => self.pending_bytes,
                 "num_locks" => num_locks,
                 "memory_quota_in_use" => self.memory_quota.in_use(),
                 "memory_quota_capacity" => self.memory_quota.capacity(),
