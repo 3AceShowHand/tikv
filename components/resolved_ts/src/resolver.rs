@@ -150,6 +150,7 @@ impl std::fmt::Debug for Resolver {
 impl Drop for Resolver {
     fn drop(&mut self) {
         // Free memory quota used by locks_by_key.
+        // todo: is this the correct way to calculate the memory usage?
         let mut bytes = 0;
         let num_locks = self.num_locks();
         for key in self.locks_by_key.keys() {
@@ -282,24 +283,21 @@ impl Resolver {
         if let Some(index) = index {
             self.update_tracked_index(index);
         }
-        let bytes = self.lock_heap_size(&key);
-        debug!(
-            "track lock {}@{}",
-            &log_wrappers::Value::key(&key),
-            start_ts;
-            "region_id" => self.region_id,
-            "memory_in_use" => self.memory_quota.in_use(),
-            "memory_capacity" => self.memory_quota.capacity(),
-            "key_heap_size" => bytes,
-        );
-        self.memory_quota.alloc(bytes)?;
         let key: Arc<[u8]> = key.into_boxed_slice().into();
         match self.locks_by_key.entry(key) {
-            HashMapEntry::Occupied(_) => {
-                // Free memory quota because it's already in the map.
-                self.memory_quota.free(bytes);
-            }
+            HashMapEntry::Occupied(_) => {}
             HashMapEntry::Vacant(entry) => {
+                let bytes = self.lock_heap_size(&key);
+                self.memory_quota.alloc(bytes)?;
+                debug!(
+                    "track lock {}@{}",
+                    &log_wrappers::Value::key(&key),
+                    start_ts;
+                    "region_id" => self.region_id,
+                    "memory_in_use" => self.memory_quota.in_use(),
+                    "memory_capacity" => self.memory_quota.capacity(),
+                    "key_heap_size" => bytes,
+                );
                 // Add lock count for the start ts.
                 let txn_locks = self.lock_ts_heap.entry(start_ts).or_insert_with(|| {
                     let mut txn_locks = TxnLocks::default();
@@ -307,7 +305,6 @@ impl Resolver {
                     txn_locks
                 });
                 txn_locks.lock_count += 1;
-
                 entry.insert(start_ts);
             }
         }

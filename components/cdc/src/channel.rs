@@ -263,7 +263,7 @@ pub struct ScanedEvent {
     pub created: Instant,
     pub event: CdcEvent,
     pub size: usize,
-    // Incremental scan can be canceled by region errors. We must check it when draing
+    // Incremental scan can be canceled by region errors. We must check it when draining
     // an event instead of emit it to `Sink`.
     pub truncated: Arc<AtomicBool>,
 }
