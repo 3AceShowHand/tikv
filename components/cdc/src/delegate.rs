@@ -270,8 +270,14 @@ impl Pending {
             Error::MemoryQuotaExceeded(tikv_util::memory::MemoryQuotaExceeded)
         ));
         // Must take locks, otherwise it may double free memory quota on drop.
-        for lock in mem::take(&mut self.locks) {
-            self.memory_quota.free(lock.approximate_heap_size());
+        let pending_locks = mem::take(&mut self.locks);
+        let total_bytes = pending_locks
+            .iter().as_ref()
+            .map(|lock| lock.approximate_heap_size())
+            .sum::<usize>();
+        self.memory_quota.free(total_bytes);
+
+        for lock in pending_locks {
             match lock {
                 PendingLock::Track { key, start_ts } => {
                     resolver.track_lock(start_ts, key, None)?;
