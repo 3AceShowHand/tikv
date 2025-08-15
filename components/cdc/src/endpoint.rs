@@ -485,7 +485,6 @@ pub struct Endpoint<T, E, S> {
     raftstore_v2: bool,
     config: CdcConfig,
     resolved_ts_config: ResolvedTsConfig,
-    api_version: ApiVersion,
 
     // Incremental scan stuffs.
     workers: Runtime,
@@ -593,7 +592,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
             raftstore_v2,
             config: config.clone(),
             resolved_ts_config: resolved_ts_config.clone(),
-            api_version,
 
             workers,
             scan_task_counter: Arc::default(),
@@ -788,7 +786,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
 
     pub fn on_register(&mut self, mut request: ChangeDataRequest, mut downstream: Downstream) {
         let kv_api = request.get_kv_api();
-        let api_version = self.api_version;
         let filter_loop = downstream.filter_loop;
 
         let region_id = request.region_id;
@@ -826,17 +823,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
                 let _ = downstream.sink_error_event(region_id, err_event);
                 return;
             }
-        }
-
-        if !validate_kv_api(kv_api, api_version) {
-            error!("cdc RawKv is supported by api-version 2 only. TxnKv is not supported now.");
-            let mut err_event = EventError::default();
-            let mut err = ErrorCompatibility::default();
-            err.set_required_version("6.2.0".to_string());
-            err_event.set_compatibility(err);
-
-            let _ = downstream.sink_error_event(region_id, err_event);
-            return;
         }
 
         let scan_task_counter = self.scan_task_counter.clone();
@@ -1100,7 +1086,7 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
         let cdc_handle = self.cdc_handle.clone();
         let regions: Vec<u64> = self.capture_regions.keys().copied().collect();
         let cm: ConcurrencyManager = self.concurrency_manager.clone();
-        let hibernate_regions_compatible = self.config.hibernate_regions_compatible;
+
         let causal_ts_provider = self.causal_ts_provider.clone();
         // We use channel to deliver leader_resolver in async block.
         let (leader_resolver_tx, leader_resolver_rx) = bounded(1);
@@ -1153,17 +1139,9 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
             });
 
             // Check region peer leadership, make sure they are leaders.
-            let gate = pd_client.feature_gate();
-            let regions =
-                if hibernate_regions_compatible && gate.can_enable(FEATURE_RESOLVED_TS_STORE) {
-                    CDC_RESOLVED_TS_ADVANCE_METHOD.set(1);
-                    leader_resolver
-                        .resolve(regions, min_ts, Some(advance_ts_interval))
-                        .await
-                } else {
-                    CDC_RESOLVED_TS_ADVANCE_METHOD.set(0);
-                    resolve_by_raft(regions, min_ts, cdc_handle).await
-                };
+            let regions = leader_resolver
+                .resolve(regions, min_ts, Some(advance_ts_interval))
+                .await;
             leader_resolver_tx.send(leader_resolver).unwrap();
 
             if !regions.is_empty() {
@@ -1630,7 +1608,6 @@ mod tests {
             .recv_timeout(Duration::from_millis(100))
             .unwrap_err();
 
-        suite.api_version = ApiVersion::V2;
         // Compatibility error.
         let downstream = Downstream::new(
             "".to_string(),
