@@ -1116,7 +1116,6 @@ where
             &self.core.config.cdc,
             &self.core.config.resolved_ts,
             self.core.config.storage.engine == EngineType::RaftKv2,
-            self.core.config.storage.api_version(),
             self.pd_client.clone(),
             cdc_scheduler.clone(),
             CdcRaftRouter(self.router.clone()),
@@ -1127,7 +1126,6 @@ where
             server.env(),
             self.security_mgr.clone(),
             cdc_memory_quota.clone(),
-            self.causal_ts_provider.clone(),
         );
         cdc_worker.start_with_timer(cdc_endpoint);
         self.core.to_stop.push(cdc_worker);

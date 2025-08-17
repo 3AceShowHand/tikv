@@ -357,15 +357,6 @@ pub(crate) struct Advance {
     // in which case progresses are grouped by (ConnId, request_id).
     pub(crate) multiplexing: HashMap<(ConnId, RequestId), ResolvedRegionHeap>,
 
-    // exclusive means one region can only be subscribed one time in one `Conn`,
-    // in which case progresses are grouped by ConnId.
-    pub(crate) exclusive: HashMap<ConnId, ResolvedRegionHeap>,
-
-    // To be compatible with old TiCDC client before v4.0.8.
-    // TODO(qupeng): we can deprecate support for too old TiCDC clients.
-    // map[(ConnId, region_id)]->(request_id, ts).
-    pub(crate) compat: HashMap<(ConnId, u64), (RequestId, TimeStamp)>,
-
     pub(crate) scan_finished: usize,
 
     pub(crate) blocked_on_scan: usize,
@@ -411,33 +402,11 @@ impl Advance {
             handle_send_result(conn, res);
         };
 
-        let mut compat_min_resolved_ts = 0;
-        let mut compat_min_ts_region_id = 0;
-        let mut compat_send = |ts: u64, conn: &Conn, region_id: u64, req_id: RequestId| {
-            if compat_min_resolved_ts == 0 || compat_min_resolved_ts > ts {
-                compat_min_resolved_ts = ts;
-                compat_min_ts_region_id = region_id;
-            }
+        let multiplexing = std::mem::take(&mut self.multiplexing)
+            .into_iter()
+            .map(|((a, b), c)| (a, b, c));
 
-            let event = Event {
-                region_id,
-                request_id: req_id.0,
-                event: Some(Event_oneof_event::ResolvedTs(ts)),
-                ..Default::default()
-            };
-            let res = conn
-                .get_sink()
-                .unbounded_send(CdcEvent::Event(event), false);
-            handle_send_result(conn, res);
-        };
-
-        let multiplexing = std::mem::take(&mut self.multiplexing).into_iter();
-        let exclusive = std::mem::take(&mut self.exclusive).into_iter();
-        let unioned = multiplexing
-            .map(|((a, b), c)| (a, b, c))
-            .chain(exclusive.map(|(a, c)| (a, RequestId(0), c)));
-
-        for (conn_id, req_id, mut region_ts_heap) in unioned {
+        for (conn_id, req_id, mut region_ts_heap) in multiplexing {
             let conn = connections.get(&conn_id).unwrap();
             let mut batch_count = 8;
             while !region_ts_heap.is_empty() {
@@ -449,18 +418,8 @@ impl Advance {
             }
         }
 
-        for ((conn_id, region_id), (req_id, ts)) in std::mem::take(&mut self.compat) {
-            let conn = connections.get(&conn_id).unwrap();
-            compat_send(ts.into_inner(), conn, region_id, req_id);
-        }
-
-        if batch_min_resolved_ts > 0 {
-            self.min_resolved_ts = batch_min_resolved_ts;
-            self.min_ts_region_id = batch_min_ts_region_id;
-        } else {
-            self.min_resolved_ts = compat_min_resolved_ts;
-            self.min_ts_region_id = compat_min_ts_region_id;
-        }
+        self.min_resolved_ts = batch_min_resolved_ts;
+        self.min_ts_region_id = batch_min_ts_region_id;
     }
 }
 
@@ -498,8 +457,6 @@ pub struct Endpoint<T, E, S> {
 
     old_value_cache: OldValueCache,
 
-    causal_ts_provider: Option<Arc<CausalTsProviderImpl>>,
-
     // Metrics and logging.
     current_ts: TimeStamp,
     min_resolved_ts: TimeStamp,
@@ -514,7 +471,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
         config: &CdcConfig,
         resolved_ts_config: &ResolvedTsConfig,
         raftstore_v2: bool,
-        api_version: ApiVersion,
         pd_client: Arc<dyn PdClient>,
         scheduler: Scheduler<Task>,
         cdc_handle: T,
@@ -525,7 +481,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
         env: Arc<Environment>,
         security_mgr: Arc<SecurityManager>,
         sink_memory_quota: Arc<MemoryQuota>,
-        causal_ts_provider: Option<Arc<CausalTsProviderImpl>>,
     ) -> Endpoint<T, E, S> {
         let workers = Builder::new_multi_thread()
             .thread_name("cdcwkr")
@@ -603,7 +558,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
             sink_memory_quota,
 
             old_value_cache,
-            causal_ts_provider,
 
             current_ts: TimeStamp::zero(),
             min_resolved_ts: TimeStamp::max(),
@@ -1087,7 +1041,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
         let regions: Vec<u64> = self.capture_regions.keys().copied().collect();
         let cm: ConcurrencyManager = self.concurrency_manager.clone();
 
-        let causal_ts_provider = self.causal_ts_provider.clone();
         // We use channel to deliver leader_resolver in async block.
         let (leader_resolver_tx, leader_resolver_rx) = bounded(1);
         let advance_ts_interval = self.resolved_ts_config.advance_ts_interval.0;
@@ -1095,15 +1048,7 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
         let fut = async move {
             let _ = timeout.compat().await;
             // Ignore get tso errors since we will retry every `min_ts_interval`.
-            let min_ts_pd = match causal_ts_provider {
-                // TiKV API v2 is enabled when causal_ts_provider is Some.
-                // In this scenario, get TSO from causal_ts_provider to make sure that
-                // RawKV write requests will get larger TSO after this point.
-                // RawKV CDC's resolved_ts is guaranteed by ConcurrencyManager::global_min_lock_ts,
-                // which lock flying keys's ts in raw put and delete interfaces in `Storage`.
-                Some(provider) => provider.async_get_ts().await.unwrap_or_default(),
-                None => pd_client.get_tso().await.unwrap_or_default(),
-            };
+            let min_ts_pd = pd_client.get_tso().await.unwrap_or_default();
             let mut min_ts = min_ts_pd;
 
             // Sync with concurrency manager so that it can work correctly when
@@ -1482,7 +1427,6 @@ mod tests {
             cfg,
             &ResolvedTsConfig::default(),
             false,
-            api_version,
             pd_client,
             task_sched.clone(),
             cdc_handle.clone(),
@@ -1499,7 +1443,6 @@ mod tests {
             env,
             security_mgr,
             memory_quota,
-            causal_ts_provider,
         );
 
         TestEndpointSuite {

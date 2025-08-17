@@ -673,19 +673,9 @@ impl Delegate {
                 None => continue,
             };
 
-            let features = connections.get(&d.conn_id).unwrap().features();
-            if features.contains(FeatureGate::STREAM_MULTIPLEXING) {
-                let k = (d.conn_id, d.req_id);
-                let v = advance.multiplexing.entry(k).or_default();
-                v.push(self.region_id, advanced_to);
-            } else if features.contains(FeatureGate::BATCH_RESOLVED_TS) {
-                let v = advance.exclusive.entry(d.conn_id).or_default();
-                v.push(self.region_id, advanced_to);
-            } else {
-                let k = (d.conn_id, self.region_id);
-                let v = (d.req_id, advanced_to);
-                advance.compat.insert(k, v);
-            }
+            let k = (d.conn_id, d.req_id);
+            let v = advance.multiplexing.entry(k).or_default();
+            v.push(self.region_id, advanced_to);
 
             let lag = current_ts
                 .physical()
