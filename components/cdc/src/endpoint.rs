@@ -411,9 +411,7 @@ impl Advance {
             let mut batch_count = 8;
             while !region_ts_heap.is_empty() {
                 let (ts, regions) = region_ts_heap.pop(batch_count);
-                if conn.features().contains(FeatureGate::BATCH_RESOLVED_TS) {
-                    batch_send(ts.into_inner(), conn, req_id, Vec::from_iter(regions));
-                }
+                batch_send(ts.into_inner(), conn, req_id, Vec::from_iter(regions));
                 batch_count *= 4;
             }
         }
