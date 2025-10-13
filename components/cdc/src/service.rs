@@ -11,6 +11,7 @@ use std::{
 use collections::{HashMap, HashMapEntry};
 use crossbeam::atomic::AtomicCell;
 use futures::{
+    SinkExt,
     compat::Stream01CompatExt,
     stream::{StreamExt, TryStreamExt},
 };
