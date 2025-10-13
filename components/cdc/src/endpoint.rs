@@ -800,19 +800,15 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
         let filter_loop = downstream.filter_loop;
 
         let region_id = request.region_id;
-        let request_id = RequestId(request.request_id);
         let conn_id = downstream.conn_id;
-        let downstream_id = downstream.id;
-        let downstream_state = downstream.get_state();
-
         // The connection can be deregistered by some internal errors. Clients will
         // always be notified by closing the GRPC server stream, so it's OK to drop
         // the task directly.
         let conn = match self.connections.get_mut(&conn_id) {
             Some(conn) => conn,
             None => {
-                info!("cdc register region on an deregistered connection, ignore";
-                    "req_id" => ?request_id, "region_id" => region_id, "conn_id" => ?conn_id);
+                warn!("cdc register region on an deregistered connection, ignore";
+                    "region_id" => region_id, "conn_id" => ?conn_id);
                 return;
             }
         };
@@ -853,7 +849,7 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
             debug!("cdc rejects registration, too many scan tasks";
                 "scan_task_count" => scan_task_count,
                 "incremental_scan_concurrency_limit" => self.config.incremental_scan_concurrency_limit,
-                "req_id" => ?request_id, "region_id" => region_id, "conn_id" => ?conn_id,
+                "region_id" => region_id, "conn_id" => ?conn_id,
 
             );
             // To avoid OOM (e.g., https://github.com/tikv/tikv/issues/16035),
@@ -875,6 +871,9 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
             }
         };
 
+        let request_id = RequestId(request.request_id);
+        let downstream_id = downstream.id;
+        let downstream_state = downstream.get_state();
         if conn
             .subscribe(request_id, region_id, downstream_id, downstream_state)
             .is_some()
@@ -973,8 +972,8 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
                 Err(e) => {
                     CDC_SCAN_TASKS.with_label_values(&["abort"]).inc();
                     warn!(
-                        "cdc initialize fail: {}", e; "region_id" => region_id,
-                        "conn_id" => ?init.conn_id, "request_id" => ?init.request_id,
+                        "cdc initialize fail: {}", e;
+                        "region_id" => region_id, "conn_id" => ?init.conn_id,
                     );
                     init.deregister_downstream(e)
                 }
@@ -1259,10 +1258,10 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta + Send> Runnable
                     return;
                 }
                 if on_init_downstream(&downstream_state) {
-                    info!("cdc downstream starts to initialize"; 
+                    info!("cdc downstream starts to initialize";
                         "region_id" => region_id, "conn_id" => ?conn_id);
                 } else {
-                    warn!("cdc downstream fails to initialize: canceled"; 
+                    warn!("cdc downstream fails to initialize: canceled";
                         "region_id" => region_id, "conn_id" => ?conn_id);
                 }
                 cb();

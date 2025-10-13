@@ -129,7 +129,6 @@ impl<E: KvEngine> Initializer<E> {
         let _permit = concurrency_semaphore.acquire().await;
 
         let region_id = self.region_id;
-        let observe_id = self.observe_handle.id;
         let conn_id = self.conn_id;
         // when there are a lot of pending incremental scan tasks, they may be stopped,
         // check the state here to accelerate tasks cancel process.
@@ -142,6 +141,7 @@ impl<E: KvEngine> Initializer<E> {
 
         // To avoid holding too many snapshots and holding them too long,
         // we need to acquire scan concurrency permit before taking snapshot.
+        let observe_id = self.observe_handle.id;
         let sched = self.sched.clone();
         let region_epoch = self.region_epoch.clone();
         let downstream_state = self.downstream_state.clone();
@@ -174,10 +174,7 @@ impl<E: KvEngine> Initializer<E> {
             })),
         ) {
             warn!("cdc send capture change cmd failed";
-                "error" => ?e,
-                "region_id" => self.region_id,
-                "conn_id" => ?self.conn_id
-            );
+                "error" => ?e, "region_id" => self.region_id, "conn_id" => ?self.conn_id);
             return Err(Error::request(e.into()));
         }
 
@@ -354,7 +351,7 @@ impl<E: KvEngine> Initializer<E> {
                     "cdc incremental scan takes too long";
                     "scanned_bytes" => scan_stat.emit, "scanned_entries" => total_scanned_entries,
                     "sink_takes" => ?sink_time, "takes" => ?start.saturating_elapsed(),
-                    "request_id" => ?self.request_id, "region_id" => region_id, "conn_id" => ?self.conn_id,
+                    "region_id" => region_id, "conn_id" => ?self.conn_id,
                 );
             }
             // When downstream_state is Stopped, it means the corresponding
@@ -385,7 +382,7 @@ impl<E: KvEngine> Initializer<E> {
         info!("cdc async incremental scan finished";
             "scanned_bytes" => scan_stat.emit, "scanned_entries" => total_scanned_entries,
             "sink_takes" => ?sink_time, "takes" => ?takes,
-            "req_id" => ?self.request_id, "region_id" => region_id, "conn_id" => ?conn_id
+            "region_id" => region_id, "conn_id" => ?conn_id
         );
 
         CDC_SCAN_DURATION_HISTOGRAM.observe(takes.as_secs_f64());
@@ -518,8 +515,8 @@ impl<E: KvEngine> Initializer<E> {
             .send_all(events, self.scan_truncated.clone())
             .await
         {
-            warn!("cdc send scan event failed"; "err" => ?e, "req_id" => ?self.request_id,
-                "region_id" => self.region_id, "conn_id" => ?self.conn_id);
+            warn!("cdc send scan event failed";
+                "err" => ?e, "region_id" => self.region_id, "conn_id" => ?self.conn_id);
             return Err(Error::Sink(e));
         }
 
