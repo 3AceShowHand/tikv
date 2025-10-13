@@ -129,16 +129,14 @@ impl<E: KvEngine> Initializer<E> {
         let _permit = concurrency_semaphore.acquire().await;
 
         let region_id = self.region_id;
-        let downstream_id = self.downstream_id;
         let observe_id = self.observe_handle.id;
+        let conn_id = self.conn_id;
         // when there are a lot of pending incremental scan tasks, they may be stopped,
         // check the state here to accelerate tasks cancel process.
         if self.downstream_state.load() == DownstreamState::Stopped {
             info!("cdc async incremental scan canceled before start";
-                "region_id" => region_id,
-                "downstream_id" => ?downstream_id,
-                "observe_id" => ?observe_id,
-                "conn_id" => ?self.conn_id);
+                "region_id" => region_id, "conn_id" => ?conn_id,
+            );
             return Err(Error::Other(box_err!("scan canceled")));
         }
 
@@ -164,7 +162,7 @@ impl<E: KvEngine> Initializer<E> {
                 if let Err(e) = sched.schedule(Task::InitDownstream {
                     region_id,
                     observe_id,
-                    downstream_id,
+                    conn_id,
                     downstream_state,
                     sink,
                     build_resolver,
@@ -176,7 +174,10 @@ impl<E: KvEngine> Initializer<E> {
             })),
         ) {
             warn!("cdc send capture change cmd failed";
-            "region_id" => self.region_id, "error" => ?e);
+                "error" => ?e,
+                "region_id" => self.region_id,
+                "conn_id" => ?self.conn_id
+            );
             return Err(Error::request(e.into()));
         }
 
@@ -229,16 +230,11 @@ impl<E: KvEngine> Initializer<E> {
         defer!(CDC_SCAN_TASKS.with_label_values(&["ongoing"]).dec());
 
         let region_id = self.region_id;
-        let downstream_id = self.downstream_id;
-        let observe_id = self.observe_handle.id;
         let conn_id = self.conn_id;
         let on_cancel = || -> Result<ScanStat> {
             info!(
                 "cdc async incremental scan canceled";
-                "region_id" => region_id,
-                "downstream_id" => ?downstream_id,
-                "observe_id" => ?observe_id,
-                "conn_id" =>?conn_id,
+                "region_id" => region_id, "conn_id" =>?conn_id,
             );
             Err(box_err!("scan canceled"))
         };
@@ -267,13 +263,11 @@ impl<E: KvEngine> Initializer<E> {
 
         debug!(
             "cdc async incremental scan";
-            "region_id" => region_id,
-            "downstream_id" => ?downstream_id,
-            "observe_id" => ?observe_id,
-            "conn_id" => ?conn_id,
             "all_key_covered" => ?self.observed_range.all_key_covered,
             "start_key" => log_wrappers::Value::key(start_key.as_encoded()),
-            "end_key" => log_wrappers::Value::key(end_key.as_encoded())
+            "end_key" => log_wrappers::Value::key(end_key.as_encoded()),
+            "region_id" => region_id,
+            "conn_id" => ?conn_id
         );
 
         if self.build_resolver.load(Ordering::Acquire) {
@@ -360,8 +354,7 @@ impl<E: KvEngine> Initializer<E> {
                     "cdc incremental scan takes too long";
                     "scanned_bytes" => scan_stat.emit, "scanned_entries" => total_scanned_entries,
                     "sink_takes" => ?sink_time, "takes" => ?start.saturating_elapsed(),
-                    "downstream_id" => ?self.downstream_id, "request_id" => ?self.request_id,
-                    "region_id" => region_id, "conn_id" => ?self.conn_id,
+                    "request_id" => ?self.request_id, "region_id" => region_id, "conn_id" => ?self.conn_id,
                 );
             }
             // When downstream_state is Stopped, it means the corresponding
@@ -378,7 +371,6 @@ impl<E: KvEngine> Initializer<E> {
                 done = true;
             }
             total_scanned_entries += entries.len();
-            debug!("cdc scan entries"; "len" => entries.len(), "region_id" => region_id);
             fail_point!("before_schedule_incremental_scan");
             let start_sink = Instant::now_coarse();
             self.sink_scan_events(entries, done).await?;
@@ -393,9 +385,7 @@ impl<E: KvEngine> Initializer<E> {
         info!("cdc async incremental scan finished";
             "scanned_bytes" => scan_stat.emit, "scanned_entries" => total_scanned_entries,
             "sink_takes" => ?sink_time, "takes" => ?takes,
-            "observe_id" => ?observe_id, "downstream_id" => ?downstream_id,
-            "request_id" => ?self.request_id, "region_id" => region_id,
-            "conn_id" => ?conn_id,
+            "req_id" => ?self.request_id, "region_id" => region_id, "conn_id" => ?conn_id
         );
 
         CDC_SCAN_DURATION_HISTOGRAM.observe(takes.as_secs_f64());
@@ -529,7 +519,7 @@ impl<E: KvEngine> Initializer<E> {
             .await
         {
             warn!("cdc send scan event failed"; "err" => ?e, "req_id" => ?self.request_id,
-                "downstream_id" => ?self.downstream_id, "region_id" => self.region_id, "conn_id" => ?self.conn_id);
+                "region_id" => self.region_id, "conn_id" => ?self.conn_id);
             return Err(Error::Sink(e));
         }
 
@@ -547,11 +537,9 @@ impl<E: KvEngine> Initializer<E> {
         let observe_id = self.observe_handle.id;
         info!(
             "cdc has scanned all incremental scan locks";
-            "region_id" => region.get_id(),
-            "conn_id" => ?self.conn_id,
-            "downstream_id" => ?self.downstream_id,
             "lock_count" => locks.len(),
-            "observe_id" => ?observe_id,
+            "region_id" => region.get_id(),
+            "conn_id" => ?self.conn_id
         );
 
         fail_point!("before_schedule_resolver_ready");
@@ -632,11 +620,10 @@ impl<E: KvEngine> Initializer<E> {
         let valid_count = total_count - filtered_count;
         let use_ts_filter = valid_count as f64 <= total_count as f64 * self.ts_filter_ratio;
         info!("cdc incremental scan uses ts filter: {}", use_ts_filter;
-            "region_id" => self.region_id,
             "hint_min_ts" => hint_min_ts,
             "mvcc_versions" => total_count,
             "filtered_versions" => filtered_count,
-            "tables" => tables);
+            "tables" => tables, "region_id" => self.region_id);
         use_ts_filter
     }
 }

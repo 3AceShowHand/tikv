@@ -198,22 +198,19 @@ impl Downstream {
     pub fn sink_event(&self, mut event: Event, force: bool) -> Result<()> {
         event.set_request_id(self.req_id.0);
         if self.sink.is_none() {
-            info!("cdc drop event, no sink";
-                "conn_id" => ?self.conn_id, "downstream_id" => ?self.id, "req_id" => ?self.req_id);
+            info!("cdc drop event, no sink"; "req_id" => ?self.req_id, "conn_id" => ?self.conn_id);
             return Err(Error::Sink(SendError::Disconnected));
         }
         let sink = self.sink.as_ref().unwrap();
         match sink.unbounded_send(CdcEvent::Event(event), force) {
             Ok(_) => Ok(()),
             Err(SendError::Disconnected) => {
-                debug!("cdc send event failed, disconnected";
-                    "conn_id" => ?self.conn_id, "downstream_id" => ?self.id, "req_id" => ?self.req_id);
+                debug!("cdc send event failed, disconnected"; "req_id" => ?self.req_id, "conn_id" => ?self.conn_id);
                 Err(Error::Sink(SendError::Disconnected))
             }
             // TODO handle errors.
             Err(e @ SendError::Full) | Err(e @ SendError::Congested) => {
-                info!("cdc send event failed, full";
-                    "conn_id" => ?self.conn_id, "downstream_id" => ?self.id, "req_id" => ?self.req_id);
+                info!("cdc send event failed, full"; "req_id" => ?self.req_id, "conn_id" => ?self.conn_id);
                 Err(Error::Sink(e))
             }
         }
@@ -223,8 +220,7 @@ impl Downstream {
     /// events or ResolvedTs will be sent to the downstream after
     /// `sink_error_event` is called.
     pub fn sink_error_event(&self, region_id: u64, err_event: EventError) -> Result<()> {
-        info!("cdc downstream meets region error";
-            "conn_id" => ?self.conn_id, "downstream_id" => ?self.id, "req_id" => ?self.req_id);
+        info!("cdc downstream meets region error"; "req_id" => ?self.req_id, "conn_id" => ?self.conn_id);
 
         self.scan_truncated.store(true, Ordering::Release);
         let mut change_data_event = Event::default();
@@ -574,9 +570,8 @@ impl Delegate {
             if let Some(error_event) = error_event {
                 if let Err(err) = d.sink_error_event(region_id, error_event.clone()) {
                     warn!("cdc send unsubscribe failed";
-                        "region_id" => region_id, "error" => ?err, "origin_error" => ?error_event,
-                        "downstream_id" => ?d.id, "downstream" => ?d.peer,
-                        "request_id" => ?d.req_id, "conn_id" => ?d.conn_id);
+                        "error" => ?err, "origin_error" => ?error_event, "downstream" => ?d.peer,
+                        "request_id" => ?d.req_id, "region_id" => region_id, "conn_id" => ?d.conn_id);
                 }
             }
             d.state.store(DownstreamState::Stopped);
@@ -609,14 +604,12 @@ impl Delegate {
             let error_event = error.clone();
             if let Err(err) = downstream.sink_error_event(region_id, error_event) {
                 warn!("cdc send region error failed";
-                    "region_id" => region_id, "error" => ?err, "origin_error" => ?error,
-                    "downstream_id" => ?downstream.id, "downstream" => ?downstream.peer,
-                    "request_id" => ?downstream.req_id, "conn_id" => ?downstream.conn_id);
+                    "error" => ?err, "origin_error" => ?error, "downstream" => ?downstream.peer,
+                    "request_id" => ?downstream.req_id, "region_id" => region_id, "conn_id" => ?downstream.conn_id);
             } else {
                 info!("cdc send region error success";
-                    "region_id" => region_id, "origin_error" => ?error,
-                    "downstream_id" => ?downstream.id, "downstream" => ?downstream.peer,
-                    "request_id" => ?downstream.req_id, "conn_id" => ?downstream.conn_id);
+                    "origin_error" => ?error, "downstream" => ?downstream.peer,
+                    "request_id" => ?downstream.req_id, "region_id" => region_id, "conn_id" => ?downstream.conn_id);
             }
         };
 
@@ -1144,11 +1137,8 @@ impl Delegate {
         ) {
             info!(
                 "cdc fail to subscribe downstream";
-                "region_id" => region.id,
-                "downstream_id" => ?downstream.id,
-                "conn_id" => ?downstream.conn_id,
-                "req_id" => ?downstream.req_id,
-                "err" => ?e
+                "err" => ?e, "req_id" => ?downstream.req_id,
+                "region_id" => region.id, "conn_id" => ?downstream.conn_id
             );
             // Downstream is outdated, mark stop.
             downstream.state.store(DownstreamState::Stopped);

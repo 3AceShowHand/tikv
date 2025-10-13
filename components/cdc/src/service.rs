@@ -436,11 +436,11 @@ impl Service {
                 Ok(headers) => headers,
                 Err(e) => {
                     let peer = ctx.peer();
-                    error!("cdc connection with bad headers"; "downstream" => ?peer, "headers" => &e);
+                    error!("cdc connection with bad headers"; "error" => &e, "downstream" => ?peer, "conn_id" => ?conn_id);
                     ctx.spawn(async move {
                         let status = RpcStatus::with_message(RpcStatusCode::UNIMPLEMENTED, e);
                         if let Err(e) = sink.fail(status).await {
-                            error!("cdc failed to send error"; "downstream" => ?peer, "error" => ?e);
+                            error!("cdc failed to send error"; "error" => ?e, "downstream" => ?peer, "conn_id" => ?conn_id);
                         }
                     });
                     return;
@@ -609,9 +609,9 @@ impl Service {
                         if elapsed > Duration::from_secs(_idle_threshold)
                             && memory_quota.used_ratio() >= CDC_MEMORY_QUOTA_ABORT_THRESHOLD {
                             error!("cdc connection idle for too long, aborting connection";
+                                   "seconds_since_last_flush" => elapsed.as_secs(),
                                    "downstream" => peer_clone.clone(),
-                                   "conn_id" => ?conn_id,
-                                   "seconds_since_last_flush" => elapsed.as_secs());
+                                   "conn_id" => ?conn_id);
                             // Cancel the gRPC connection
                             let _ = cancel_tx.send(());
                             break;

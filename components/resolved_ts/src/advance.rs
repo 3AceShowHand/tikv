@@ -459,7 +459,7 @@ where
                 }
             }));
             if let Err(e) = cdc_handle_clone.check_leadership(region_id, callback) {
-                warn!("cdc send LeaderCallback failed"; "err" => ?e, "min_ts" => min_ts);
+                warn!("cdc send LeaderCallback failed"; "err" => ?e, "min_ts" => min_ts, "region_id" => region_id);
                 return None;
             }
             rx.await.unwrap_or(None)
