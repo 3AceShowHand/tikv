@@ -302,9 +302,8 @@ impl Service {
         semver::Version::parse(version_field).unwrap_or_else(|e| {
             warn!(
                 "empty or invalid TiCDC version, please upgrading TiCDC";
-                "version" => version_field,
+                "error" => ?e, "version" => version_field,
                 "downstream" => ?peer, "region_id" => request.region_id,
-                "error" => ?e,
             );
             semver::Version::new(0, 0, 0)
         })
@@ -460,7 +459,7 @@ impl Service {
             });
             return;
         }
-        info!("cdc connection created"; "features" => ?explicit_features, 
+        info!("cdc connection created"; "features" => ?explicit_features,
             "downstream" => ctx.peer(), "conn_id" => ?conn_id);
 
         let peer = ctx.peer();
@@ -573,7 +572,7 @@ impl Service {
             loop {
                 tokio::select! {
                     _ = &mut forward_exit_rx => {
-                        info!("cdc connection forward exit signal received, stopping watchdog");
+                        info!("cdc connection forward exit signal received, stopping watchdog"; "conn_id" => ?conn_id);
                         break;
                     }
                     _ = interval.next() => {
@@ -582,9 +581,9 @@ impl Service {
                         // Check if last flush was more than the warning threshold
                         if elapsed > Duration::from_secs(CDC_IDLE_WARNING_THRESHOLD_SECS) {
                             warn!("cdc connection idle too long";
+                                  "seconds_since_last_flush" => elapsed.as_secs(),
                                   "downstream" => peer_clone.clone(),
-                                  "conn_id" => ?conn_id,
-                                  "seconds_since_last_flush" => elapsed.as_secs());
+                                  "conn_id" => ?conn_id);
                         }
 
                         let _idle_threshold = CDC_IDLE_DEREGISTER_THRESHOLD_SECS;
