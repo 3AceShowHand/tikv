@@ -645,12 +645,8 @@ impl Delegate {
                 if elapsed > WARN_LAG_THRESHOLD
                     && now.duration_since(self.last_lag_warn) > WARN_LAG_INTERVAL
                 {
-                    warn!(
-                        "cdc region scan locks too slow";
-                        "region_id" => self.region_id,
-                        "elapsed" => ?elapsed,
-                        "stage" => ?self.lock_tracker,
-                    );
+                    warn!("cdc region scan locks too slow"; "stage" => ?self.lock_tracker,
+                        "elapsed" => ?elapsed, "region_id" => self.region_id);
                     self.last_lag_warn = now;
                 }
                 return;
@@ -716,10 +712,8 @@ impl Delegate {
         if !slow_downstreams.is_empty() {
             let now = Instant::now_coarse();
             if now.duration_since(self.last_lag_warn) > WARN_LAG_INTERVAL {
-                warn!(
-                    "cdc region downstreams are too slow";
-                    "region_id" => self.region_id,
-                    "downstreams" => ?slow_downstreams,
+                warn!("cdc region downstreams are too slow";
+                    "downstreams" => ?slow_downstreams, "region_id" => self.region_id,
                 );
                 self.last_lag_warn = now;
             }
@@ -749,11 +743,13 @@ impl Delegate {
                 return Err(Error::request(err_header));
             }
             if !request.has_admin_request() {
-                let flags = WriteBatchFlags::from_bits_truncate(request.get_header().get_flags());
+                let is_one_pc =
+                    WriteBatchFlags::from_bits_truncate(request.get_header().get_flags())
+                        .contains(WriteBatchFlags::ONE_PC);
                 self.sink_data(
                     index,
                     request.requests.into(),
-                    flags,
+                    is_one_pc,
                     old_value_cb,
                     old_value_cache,
                     statistics,
@@ -870,7 +866,7 @@ impl Delegate {
         &mut self,
         index: u64,
         requests: Vec<Request>,
-        flags: WriteBatchFlags,
+        is_one_pc: bool,
         old_value_cb: &OldValueCallback,
         old_value_cache: &mut OldValueCache,
         statistics: &mut Statistics,
@@ -885,13 +881,13 @@ impl Delegate {
         };
 
         let mut rows_builder = RowsBuilder::default();
-        rows_builder.is_one_pc = flags.contains(WriteBatchFlags::ONE_PC);
+        rows_builder.is_one_pc = is_one_pc;
         for mut req in requests {
             match req.get_cmd_type() {
                 CmdType::Put => self.sink_put(req.take_put(), &mut rows_builder)?,
-                _ => debug!("cdc skip other command";
-                    "region_id" => self.region_id,
-                    "command" => ?req),
+                _ => {
+                    debug!("cdc skip other command"; "command" => ?req, "region_id" => self.region_id);
+                }
             };
         }
 
@@ -1081,7 +1077,7 @@ impl Delegate {
                 let row = rows.txns_by_key.entry(key).or_default();
                 decode_default(put.take_value(), &mut row.v, &mut row.has_value);
             }
-            other => panic!("invalid cf {}", other),
+            other => panic!("cdc meet invalid cf {}", other),
         }
         Ok(())
     }
@@ -1135,8 +1131,7 @@ impl Delegate {
             true,  // check_ver
             true,  // include_region
         ) {
-            info!(
-                "cdc fail to subscribe downstream";
+            info!("cdc failed to subscribe downstream since epoch not match";
                 "err" => ?e, "req_id" => ?downstream.req_id,
                 "region_id" => region.id, "conn_id" => ?downstream.conn_id
             );

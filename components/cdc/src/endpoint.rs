@@ -743,9 +743,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
                         let err = Some(Error::Other("region not found".into()));
                         self.deregister_downstream(region_id, downstream, err);
                     }
-                } else {
-                    info!("cdc connection already deregistered for region deregister";
-                      "request_id" => ?request_id, "region_id" => region_id, "conn_id" => ?conn_id);
                 }
             }
             Deregister::Downstream {
@@ -850,7 +847,6 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
                 "scan_task_count" => scan_task_count,
                 "incremental_scan_concurrency_limit" => self.config.incremental_scan_concurrency_limit,
                 "region_id" => region_id, "conn_id" => ?conn_id,
-
             );
             // To avoid OOM (e.g., https://github.com/tikv/tikv/issues/16035),
             // TiKV needs to reject and return error immediately.
