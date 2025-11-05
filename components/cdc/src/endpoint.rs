@@ -357,15 +357,6 @@ pub(crate) struct Advance {
     // in which case progresses are grouped by (ConnId, request_id).
     pub(crate) multiplexing: HashMap<(ConnId, RequestId), ResolvedRegionHeap>,
 
-    // exclusive means one region can only be subscribed one time in one `Conn`,
-    // in which case progresses are grouped by ConnId.
-    pub(crate) exclusive: HashMap<ConnId, ResolvedRegionHeap>,
-
-    // To be compatible with old TiCDC client before v4.0.8.
-    // TODO(qupeng): we can deprecate support for too old TiCDC clients.
-    // map[(ConnId, region_id)]->(request_id, ts).
-    pub(crate) compat: HashMap<(ConnId, u64), (RequestId, TimeStamp)>,
-
     pub(crate) scan_finished: usize,
 
     pub(crate) blocked_on_scan: usize,
@@ -411,55 +402,23 @@ impl Advance {
             handle_send_result(conn, res);
         };
 
-        let mut compat_min_resolved_ts = 0;
-        let mut compat_min_ts_region_id = 0;
-        let mut compat_send = |ts: u64, conn: &Conn, region_id: u64, req_id: RequestId| {
-            if compat_min_resolved_ts == 0 || compat_min_resolved_ts > ts {
-                compat_min_resolved_ts = ts;
-                compat_min_ts_region_id = region_id;
-            }
-
-            let event = Event {
-                region_id,
-                request_id: req_id.0,
-                event: Some(Event_oneof_event::ResolvedTs(ts)),
-                ..Default::default()
-            };
-            let res = conn
-                .get_sink()
-                .unbounded_send(CdcEvent::Event(event), false);
-            handle_send_result(conn, res);
-        };
-
-        let multiplexing = std::mem::take(&mut self.multiplexing).into_iter();
-        let exclusive = std::mem::take(&mut self.exclusive).into_iter();
-        let unioned = multiplexing
-            .map(|((a, b), c)| (a, b, c))
-            .chain(exclusive.map(|(a, c)| (a, RequestId(0), c)));
+        let unioned = std::mem::take(&mut self.multiplexing)
+            .into_iter()
+            .map(|((a, b), c)| (a, b, c));
 
         for (conn_id, req_id, mut region_ts_heap) in unioned {
             let conn = connections.get(&conn_id).unwrap();
             let mut batch_count = 8;
             while !region_ts_heap.is_empty() {
                 let (ts, regions) = region_ts_heap.pop(batch_count);
-                if conn.features().contains(FeatureGate::BATCH_RESOLVED_TS) {
-                    batch_send(ts.into_inner(), conn, req_id, Vec::from_iter(regions));
-                }
+                batch_send(ts.into_inner(), conn, req_id, Vec::from_iter(regions));
                 batch_count *= 4;
             }
-        }
-
-        for ((conn_id, region_id), (req_id, ts)) in std::mem::take(&mut self.compat) {
-            let conn = connections.get(&conn_id).unwrap();
-            compat_send(ts.into_inner(), conn, region_id, req_id);
         }
 
         if batch_min_resolved_ts > 0 {
             self.min_resolved_ts = batch_min_resolved_ts;
             self.min_ts_region_id = batch_min_ts_region_id;
-        } else {
-            self.min_resolved_ts = compat_min_resolved_ts;
-            self.min_ts_region_id = compat_min_ts_region_id;
         }
     }
 }
@@ -732,7 +691,7 @@ impl<T: 'static + CdcHandle<E>, E: KvEngine, S: StoreRegionMeta> Endpoint<T, E, 
                         self.deregister_downstream(region_id, downstream, err);
                     }
                 } else {
-                    info!("cdc connection already deregistered for request deregister"; 
+                    info!("cdc connection already deregistered for request deregister";
                     "request_id" => ?request_id, "conn_id" => ?conn_id);
                 }
             }
