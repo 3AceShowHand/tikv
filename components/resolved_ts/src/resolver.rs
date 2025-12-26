@@ -25,7 +25,6 @@ pub enum TsSource {
     // The following sources can also come from PD or memory lock, but we care more about sources
     // in resolved-ts.
     BackupStream,
-    Cdc,
 }
 
 impl TsSource {
@@ -35,7 +34,6 @@ impl TsSource {
             TsSource::MemoryLock(_) => "rts_cm_min_lock",
             TsSource::PdTso => "pd_tso",
             TsSource::BackupStream => "backup_stream",
-            TsSource::Cdc => "cdc",
         }
     }
 

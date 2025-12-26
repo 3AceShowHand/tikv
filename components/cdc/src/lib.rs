@@ -12,6 +12,7 @@ mod initializer;
 pub mod metrics;
 mod observer;
 mod old_value;
+mod resolved_ts;
 mod service;
 mod txn_source;
 
